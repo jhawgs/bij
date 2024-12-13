@@ -383,7 +383,8 @@ def preprocess_images(images):
 
 if __name__ == "__main__":
   BATCH_SIZE = 128
-  _ckpt = sorted(glob("./checkpoints/*.weights.h5"), key=lambda x: int(x.split("/")[-1].split("-")[0]))[-1]
+  _ckpt = sorted(glob("./checkpoints/*.weights.h5"), key=lambda x: int(x.split("/")[-1].split("-")[0]))
+  _ckpt = _ckpt[-1] if len(_ckpt) > 0 else None
   with tf.device("/GPU:0"):
     (train_images, _), (test_images, test_labels) = tf.keras.datasets.mnist.load_data()
     train_images = preprocess_images(train_images)
@@ -408,7 +409,8 @@ if __name__ == "__main__":
         bio=tf.keras.optimizers.Adam(1e-4, beta_1=.5)
     )
     model.built = True
-    model.load_weights(_ckpt)
+    if _ckpt is not None:
+        model.load_weights(_ckpt)
     model.summary()
     clear()
     tbcb = tf.keras.callbacks.TensorBoard(log_dir="./logs", write_graph=False)
