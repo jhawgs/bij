@@ -1,28 +1,35 @@
 import os
+from glob import glob
 
-os.system("rm -r ./checkpoints")
-os.system("rm -r ./logs")
-os.system("rm -r ./_r")
-os.system("rm -r ./_g")
-os.system("rm -r ./_s")
+def clear():
+    os.system("rm -r ./checkpoints")
+    os.system("rm -r ./logs")
+    os.system("rm -r ./_r")
+    os.system("rm -r ./_g")
+    os.system("rm -r ./_s")
 
-os.system("mkdir ./_r")
-os.system("mkdir ./_g")
-os.system("mkdir ./_s")
+    os.system("mkdir ./_r")
+    os.system("mkdir ./_g")
+    os.system("mkdir ./_s")
 
 import tensorflow as tf
 import numpy as np
 import matplotlib.pyplot as plt
 
-POINT_SIZE = 15
-ALPHA = .72
+POINT_SIZE = 5
+ALPHA = .6
 LINE_WIDTH = 0
+INTERVAL = 10
+SCATTER_XLIM = (-1.5, 1.5)
+SCATTER_YLIM = (-1.5, 1.5)
+RG_LIMS = (-1.5, 1.5)
 
 class RGCallback(tf.keras.callbacks.Callback):
-    def __init__(self, images, interval=5):
+    def __init__(self, images, interval=INTERVAL, lims=(-3, 3)):
         super().__init__()
         self.images = images
         self.interval = interval
+        self.lims = lims
 
     def on_epoch_end(self, epoch, logs=None):
         if epoch % self.interval == 0:
@@ -43,7 +50,7 @@ class RGCallback(tf.keras.callbacks.Callback):
 
           size = 5
           f, axarr = plt.subplots(size,size)
-          ivl = np.linspace(-3, 3, size)
+          ivl = np.linspace(self.lims[0], self.lims[1], size)
           for r in range(size):
               for c in range(size):
                   axarr[r,c].imshow(model.decode(np.array([[ivl[r], ivl[c]]]))[0])
@@ -52,7 +59,7 @@ class RGCallback(tf.keras.callbacks.Callback):
           plt.close()
 
 class SCallback(tf.keras.callbacks.Callback):
-    def __init__(self, images, labels, interval=5, xlim=(-4, 4), ylim=(-4, 4)):
+    def __init__(self, images, labels, interval=INTERVAL, xlim=(-4, 4), ylim=(-4, 4)):
         super().__init__()
         self.images = images
         self.labels = labels
@@ -375,12 +382,9 @@ def preprocess_images(images):
   return (images - 1).astype('float32')#np.where(images > .5, 1.0, 0.0).astype('float32')
 
 if __name__ == "__main__":
-  cluster_resolver = tf.distribute.cluster_resolver.TPUClusterResolver()
-  tf.config.experimental_connect_to_cluster(cluster_resolver)
-  tf.tpu.experimental.initialize_tpu_system(cluster_resolver)
-  tpu_strategy = tf.distribute.TPUStrategy(cluster_resolver)
-  BATCH_SIZE = 16 * tpu_strategy.num_replicas_in_sync
-  with tpu_strategy.scope():
+  BATCH_SIZE = 128
+  _ckpt = sorted(glob("./checkpoints/*.weights.h5"), key=lambda x: int(x.split("/")[-1].split("-")[0]))[-1]
+  with tf.device("/GPU:0"):
     (train_images, _), (test_images, test_labels) = tf.keras.datasets.mnist.load_data()
     train_images = preprocess_images(train_images)
     test_images = preprocess_images(test_images)
@@ -404,9 +408,11 @@ if __name__ == "__main__":
         bio=tf.keras.optimizers.Adam(1e-4, beta_1=.5)
     )
     model.built = True
+    model.load_weights(_ckpt)
     model.summary()
+    clear()
     tbcb = tf.keras.callbacks.TensorBoard(log_dir="./logs", write_graph=False)
-    ckcb = tf.keras.callbacks.ModelCheckpoint("./checkpoints/{epoch:02d}-{val_ed_loss:.2f}.weights.h5", save_weights_only=True)
-    rgcb = RGCallback(test_images)
-    sccb = SCallback(test_images, test_labels)
+    ckcb = tf.keras.callbacks.ModelCheckpoint("./checkpoints/{epoch:02d}-.weights.h5", save_weights_only=True, save_freq=20*400)
+    rgcb = RGCallback(test_images, lims=RG_LIMS)
+    sccb = SCallback(test_images[:8000], test_labels[:8000], xlim=SCATTER_XLIM, ylim=SCATTER_YLIM)
     model.fit(train_dataset, validation_data=test_dataset, epochs=56000, callbacks=[tbcb, ckcb, rgcb, sccb])
